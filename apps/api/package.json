@@ -1,0 +1,33 @@
+{
+  "name": "money-detective-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "generate:data": "tsx src/data/generator/generateDataset.ts",
+    "validate:data": "tsx src/data/validateDataset.ts",
+    "investigate:data": "tsx src/investigation/runInvestigation.ts",
+    "evaluate:data": "tsx src/evaluation/evaluateInvestigation.ts",
+    "cases:data": "tsx src/investigation/runCases.ts",
+    "graphs:data": "tsx src/investigation/runEvidenceGraphs.ts",
+    "ai:data": "tsx src/ai/runAIInvestigator.ts",
+    "recover:data": "tsx src/recovery/runRecovery.ts",
+    "verify:pipeline": "tsx src/verification/verifyPipeline.ts",
+    "verify:recovery": "tsx src/verification/runRecoveryVerification.ts"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}
