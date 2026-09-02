@@ -540,3 +540,140 @@ export function investigateCase(
       "1.0.0",
   };
 }
+
+export async function investigateCaseWithOllama(
+  investigationCase: InvestigationCase,
+  graph: EvidenceGraph
+): Promise<AIInvestigationReport> {
+  const baseReport = investigateCase(
+    investigationCase,
+    graph
+  );
+
+  const prompt = `
+You are Money Detective, a financial investigation assistant.
+
+You MUST reason only from the supplied evidence.
+Do NOT invent transactions, amounts, records, or causes.
+Do NOT change any financial calculations.
+
+The deterministic financial engine has already calculated the financial facts.
+Your job is to improve the investigation explanation for a finance user.
+
+CASE:
+${JSON.stringify(investigationCase, null, 2)}
+
+EVIDENCE GRAPH:
+${JSON.stringify(graph, null, 2)}
+
+DETERMINISTIC FINDING:
+${JSON.stringify(baseReport.finding, null, 2)}
+
+Return ONLY valid JSON with exactly these fields:
+
+{
+  "title": "short investigation title",
+  "whatHappened": "clear explanation of what happened",
+  "whyItMatters": "business impact",
+  "merchantExplanation": "plain-English explanation for the merchant",
+  "recommendedNextStep": "recommended investigation or recovery step"
+}
+
+Important:
+- Preserve all financial amounts from the deterministic finding.
+- Never calculate a different financial amount.
+- Do not invent evidence.
+- Be concise and specific.
+`;
+
+  const response = await fetch(
+    "http://localhost:11434/api/chat",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "qwen3:4b",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a grounded financial investigation assistant. Return JSON only.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        stream: false,
+        think: false,
+        format: "json",
+        options: {
+          temperature: 0.1,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Ollama request failed (${response.status})`
+    );
+  }
+
+  const data = await response.json();
+
+  const rawContent =
+    data?.message?.content;
+
+  if (
+    typeof rawContent !== "string" ||
+    !rawContent.trim()
+  ) {
+    throw new Error(
+      "Ollama returned an empty response."
+    );
+  }
+
+  const ai = JSON.parse(rawContent);
+
+  return {
+    ...baseReport,
+
+    finding: {
+      ...baseReport.finding,
+
+      title:
+        typeof ai.title === "string"
+          ? ai.title
+          : baseReport.finding.title,
+
+      whatHappened:
+        typeof ai.whatHappened === "string"
+          ? ai.whatHappened
+          : baseReport.finding.whatHappened,
+
+      whyItMatters:
+        typeof ai.whyItMatters === "string"
+          ? ai.whyItMatters
+          : baseReport.finding.whyItMatters,
+
+      merchantExplanation:
+        typeof ai.merchantExplanation === "string"
+          ? ai.merchantExplanation
+          : baseReport.finding.merchantExplanation,
+
+      recommendedNextStep:
+        typeof ai.recommendedNextStep === "string"
+          ? ai.recommendedNextStep
+          : baseReport.finding.recommendedNextStep,
+    },
+
+    generatedAt:
+      new Date().toISOString(),
+
+    investigatorVersion:
+      "2.0.0-ollama-qwen3",
+  };
+}
