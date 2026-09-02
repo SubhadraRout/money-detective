@@ -19,12 +19,12 @@ interface GroundTruthFile {
 
 const datasetPath = path.resolve(
   process.cwd(),
-  "../data/generated/financial-dataset.json"
+  "apps/data/generated/financial-dataset.json"
 );
 
 const groundTruthPath = path.resolve(
   process.cwd(),
-  "../data/ground-truth/ground-truth.json"
+  "apps/data/ground-truth/ground-truth.json"
 );
 
 function loadJson<T>(
