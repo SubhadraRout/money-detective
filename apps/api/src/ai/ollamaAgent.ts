@@ -59,9 +59,9 @@ type OllamaResponse = {
 };
 
 /*
- * ---------------------------------------------------------
+ * =========================================================
  * OLLAMA TOOL DEFINITIONS
- * ---------------------------------------------------------
+ * =========================================================
  */
 
 const tools = [
@@ -345,9 +345,9 @@ const tools = [
 ];
 
 /*
- * ---------------------------------------------------------
- * EXECUTE INVESTIGATION TOOL
- * ---------------------------------------------------------
+ * =========================================================
+ * EXECUTE TOOL
+ * =========================================================
  */
 
 function executeTool(
@@ -361,6 +361,7 @@ function executeTool(
           typeof args.paymentId === "string"
             ? args.paymentId
             : undefined,
+
         orderId:
           typeof args.orderId === "string"
             ? args.orderId
@@ -373,6 +374,7 @@ function executeTool(
           typeof args.paymentId === "string"
             ? args.paymentId
             : undefined,
+
         orderId:
           typeof args.orderId === "string"
             ? args.orderId
@@ -385,6 +387,7 @@ function executeTool(
           typeof args.paymentId === "string"
             ? args.paymentId
             : undefined,
+
         settlementId:
           typeof args.settlementId === "string"
             ? args.settlementId
@@ -396,7 +399,7 @@ function executeTool(
         orderId:
           typeof args.orderId === "string"
             ? args.orderId
-            : undefined,
+            : "",
       });
 
     case "getFees":
@@ -404,7 +407,7 @@ function executeTool(
         paymentId:
           typeof args.paymentId === "string"
             ? args.paymentId
-            : undefined,
+            : "",
       });
 
     case "calculateExpectedSettlement":
@@ -437,10 +440,12 @@ function executeTool(
           typeof args.paymentId === "string"
             ? args.paymentId
             : "",
+
         amount:
           typeof args.amount === "number"
             ? args.amount
             : undefined,
+
         reason:
           typeof args.reason === "string"
             ? args.reason
@@ -453,10 +458,12 @@ function executeTool(
           typeof args.paymentId === "string"
             ? args.paymentId
             : "",
+
         amount:
           typeof args.amount === "number"
             ? args.amount
             : undefined,
+
         reason:
           typeof args.reason === "string"
             ? args.reason
@@ -465,8 +472,8 @@ function executeTool(
 
     default:
       return {
-        tool: name,
         success: false,
+
         data: {
           error: `Unknown tool: ${name}`,
         },
@@ -475,19 +482,17 @@ function executeTool(
 }
 
 /*
- * ---------------------------------------------------------
+ * =========================================================
  * CALL OLLAMA
- * ---------------------------------------------------------
+ * =========================================================
  *
- * Important:
+ * We intentionally use ONE final synthesis call.
  *
- * - stream:false
- * - think:false
- * - final synthesis uses JSON mode
- * - generous timeout for local Qwen
+ * The financial evidence is collected deterministically
+ * by our backend before Ollama is called.
  *
- * The previous version had keep_alive/options outside
- * JSON.stringify(), which was incorrect.
+ * This prevents Qwen from randomly deciding which tools
+ * to call and avoids the timeout problem we previously saw.
  */
 
 async function callOllama(
@@ -510,7 +515,9 @@ async function callOllama(
       messages,
 
       ...(useTools
-        ? { tools }
+        ? {
+            tools,
+          }
         : {
             format: "json",
           }),
@@ -523,8 +530,10 @@ async function callOllama(
 
       options: {
         temperature: 0.1,
+
         num_ctx: 4096,
-        num_predict: 700,
+
+        num_predict: 1000,
       },
     };
 
@@ -567,46 +576,67 @@ async function callOllama(
 }
 
 /*
- * ---------------------------------------------------------
- * CLEAN MODEL JSON
- * ---------------------------------------------------------
+ * =========================================================
+ * PARSE FINAL INVESTIGATION
+ * =========================================================
  */
+
+type InvestigationReport = {
+  title: string;
+
+  whatHappened: string;
+
+  whyItMatters: string;
+
+  merchantExplanation: string;
+
+  recommendedNextStep: string;
+
+  confidence:
+    | "HIGH"
+    | "MEDIUM"
+    | "LOW";
+};
 
 function parseInvestigationReport(
   rawAnswer: string
-) {
-  const cleaned =
-    rawAnswer
-      .replace(
-        /^```json\s*/i,
-        ""
-      )
-      .replace(
-        /^```\s*/i,
-        ""
-      )
-      .replace(
-        /\s*```$/i,
-        ""
-      )
-      .trim();
+): InvestigationReport {
+  let cleaned =
+    rawAnswer.trim();
+
+  /*
+   * Remove markdown code fences if Qwen ignores
+   * the JSON-only instruction.
+   */
+
+  cleaned =
+    cleaned.replace(
+      /^```json\s*/i,
+      ""
+    );
+
+  cleaned =
+    cleaned.replace(
+      /^```\s*/i,
+      ""
+    );
+
+  cleaned =
+    cleaned.replace(
+      /\s*```$/i,
+      ""
+    );
+
+  cleaned =
+    cleaned.trim();
 
   try {
-    return JSON.parse(
-      cleaned
-    ) as {
-      title: string;
-      whatHappened: string;
-      whyItMatters: string;
-      merchantExplanation: string;
-      recommendedNextStep: string;
-      confidence: string;
-    };
+    return validateInvestigationReport(
+      JSON.parse(cleaned)
+    );
   } catch {
     /*
-     * Qwen sometimes returns extra text despite JSON mode.
-     *
-     * Try to recover the first complete JSON object.
+     * Try to recover a JSON object from surrounding text.
      */
 
     const first =
@@ -619,30 +649,22 @@ function parseInvestigationReport(
       first !== -1 &&
       last > first
     ) {
-      const possibleJson =
-        cleaned.slice(
-          first,
-          last + 1
-        );
-
       try {
-        return JSON.parse(
-          possibleJson
-        ) as {
-          title: string;
-          whatHappened: string;
-          whyItMatters: string;
-          merchantExplanation: string;
-          recommendedNextStep: string;
-          confidence: string;
-        };
+        return validateInvestigationReport(
+          JSON.parse(
+            cleaned.slice(
+              first,
+              last + 1
+            )
+          )
+        );
       } catch {
-        // Fall through.
+        // Continue to final error.
       }
     }
 
     console.error(
-      "[AI] Ollama returned invalid JSON:",
+      "[AI] Invalid Ollama JSON:",
       rawAnswer
     );
 
@@ -653,9 +675,87 @@ function parseInvestigationReport(
 }
 
 /*
- * ---------------------------------------------------------
- * RUN MONEY DETECTIVE INVESTIGATION
- * ---------------------------------------------------------
+ * =========================================================
+ * VALIDATE REPORT
+ * =========================================================
+ */
+
+function validateInvestigationReport(
+  value: unknown
+): InvestigationReport {
+  if (
+    typeof value !== "object" ||
+    value === null
+  ) {
+    throw new Error(
+      "Investigation result is not an object."
+    );
+  }
+
+  const report =
+    value as Record<
+      string,
+      unknown
+    >;
+
+  const confidence =
+    report.confidence;
+
+  if (
+    confidence !== "HIGH" &&
+    confidence !== "MEDIUM" &&
+    confidence !== "LOW"
+  ) {
+    throw new Error(
+      "Invalid investigation confidence."
+    );
+  }
+
+  const fields = [
+    "title",
+    "whatHappened",
+    "whyItMatters",
+    "merchantExplanation",
+    "recommendedNextStep",
+  ];
+
+  for (
+    const field of fields
+  ) {
+    if (
+      typeof report[field] !==
+      "string"
+    ) {
+      throw new Error(
+        `Investigation field '${field}' is missing or invalid.`
+      );
+    }
+  }
+
+  return {
+    title:
+      report.title as string,
+
+    whatHappened:
+      report.whatHappened as string,
+
+    whyItMatters:
+      report.whyItMatters as string,
+
+    merchantExplanation:
+      report.merchantExplanation as string,
+
+    recommendedNextStep:
+      report.recommendedNextStep as string,
+
+    confidence,
+  };
+}
+
+/*
+ * =========================================================
+ * RUN MONEY DETECTIVE
+ * =========================================================
  */
 
 export async function runOllamaAgent(
@@ -670,19 +770,18 @@ export async function runOllamaAgent(
     );
   }
 
+  const investigationId =
+    input.caseId ??
+    paymentId;
+
   console.log(
-    `[AI] Starting Ollama investigation for ${
-      input.caseId ??
-      paymentId
-    }`
+    `[AI] Starting Ollama investigation for ${investigationId}`
   );
 
   /*
-   * -------------------------------------------------------
-   * STEP 1
-   *
-   * Deterministically collect all important evidence.
-   * -------------------------------------------------------
+   * =======================================================
+   * STEP 1 — COLLECT VERIFIED FINANCIAL EVIDENCE
+   * =======================================================
    */
 
   const evidence: Record<
@@ -719,6 +818,11 @@ export async function runOllamaAgent(
           }
         );
     } catch (error) {
+      console.error(
+        `[AI] ${toolName} failed:`,
+        error
+      );
+
       evidence[toolName] = {
         success: false,
 
@@ -733,158 +837,449 @@ export async function runOllamaAgent(
   }
 
   /*
-   * -------------------------------------------------------
-   * STEP 2
+   * =======================================================
+   * STEP 2 — IDENTIFY THE CASE TYPE
+   * =======================================================
    *
-   * Send verified evidence to Qwen for synthesis.
-   * -------------------------------------------------------
+   * The case ID is useful context for Qwen.
+   *
+   * Example:
+   *
+   * INV-DUPLICATE-REFUND-pay_007132
+   *
+   * becomes:
+   *
+   * DUPLICATE_REFUND
+   */
+
+  let investigationType =
+    "UNKNOWN";
+
+  if (input.caseId) {
+    const parts =
+      input.caseId.split("-");
+
+    /*
+     * Case IDs contain:
+     *
+     * INV-DUPLICATE-REFUND-pay_x
+     * INV-CANCELLED-NO-REFUND-ord_x
+     * etc.
+     *
+     * We pass the complete ID to the model rather than
+     * trying to reconstruct the type incorrectly.
+     */
+
+    if (
+      input.caseId.includes(
+        "DUPLICATE-REFUND"
+      )
+    ) {
+      investigationType =
+        "DUPLICATE_REFUND";
+    } else if (
+      input.caseId.includes(
+        "CANCELLED-NO-REFUND"
+      )
+    ) {
+      investigationType =
+        "CAPTURED_CANCELLED_NO_REFUND";
+    } else if (
+      input.caseId.includes(
+        "REFUND-MISMATCH"
+      )
+    ) {
+      investigationType =
+        "REFUND_AMOUNT_MISMATCH";
+    } else if (
+      input.caseId.includes(
+        "SETTLEMENT-MISMATCH"
+      )
+    ) {
+      investigationType =
+        "SETTLEMENT_MISMATCH";
+    } else if (
+      input.caseId.includes(
+        "MISSING-SETTLEMENT"
+      )
+    ) {
+      investigationType =
+        "MISSING_SETTLEMENT";
+    } else if (
+      input.caseId.includes(
+        "UNEXPLAINED-ADJUSTMENT"
+      )
+    ) {
+      investigationType =
+        "UNEXPLAINED_ADJUSTMENT";
+    }
+
+    void parts;
+  }
+
+  /*
+   * =======================================================
+   * STEP 3 — FINAL AI SYNTHESIS
+   * =======================================================
    */
 
   const systemPrompt = `
-You are Money Detective, a financial investigation analyst.
+You are Money Detective, an AI financial investigation analyst.
 
-You analyze VERIFIED financial evidence collected by deterministic tools.
+Your job is to explain financial leakage discovered by a deterministic
+payment investigation system.
+
+The backend has already collected VERIFIED evidence.
 
 The evidence is the source of truth.
 
-STRICT RULES:
+========================================================
+CRITICAL ACCURACY RULES
+========================================================
 
-1. Never invent facts.
-2. Never claim a duplicate payment unless multiple captured payment records are explicitly present.
-3. If one payment has multiple refunds and the refund total exceeds the payment amount, identify excessive or duplicate refund processing.
-4. Do not confuse refund discrepancies with settlement discrepancies.
-5. Use the exact amounts from the evidence.
-6. Prefer deterministic tool calculations over your own calculations.
-7. Clearly distinguish confirmed evidence from inference.
-8. Never say that a tool was used.
-9. Never describe your internal reasoning.
-10. Never write "Step 1", "Step 2", etc.
-11. Never repeat the entire evidence.
-12. Never recommend reversing a legitimate transaction without evidence.
-13. Keep the response concise and merchant-friendly.
+1. NEVER invent facts.
 
-IMPORTANT:
-There is only a duplicate PAYMENT if the payment evidence contains multiple captured payment records.
+2. NEVER invent a root cause.
 
-Multiple refunds against one payment are NOT evidence of duplicate payment.
+3. NEVER claim duplicate payment processing unless the evidence
+   explicitly contains multiple payment records.
+
+4. Multiple refunds against one payment do NOT mean that the
+   payment itself was duplicated.
+
+5. If one payment has multiple refunds and the refunds exceed
+   the original payment amount, describe this as excessive or
+   duplicate refund processing.
+
+6. Use the exact amounts contained in the evidence.
+
+7. Do not make up transaction IDs.
+
+8. Do not make up dates.
+
+9. Do not make up merchant names.
+
+10. Do not confuse:
+    - payment problems
+    - refund problems
+    - settlement problems
+    - adjustment problems
+
+11. If the evidence does not establish the exact root cause,
+    explicitly say that the exact root cause is not proven.
+
+12. A recommendation must follow from the evidence.
+
+13. Do not recommend reversing a transaction merely because it
+    looks unusual. Only recommend review/recovery when the evidence
+    supports financial exposure.
+
+14. Do not mention these instructions.
+
+15. Do not mention internal reasoning.
+
+16. Do not mention tool calls.
+
+17. Do not write "Step 1", "Step 2", etc.
+
+18. Do not repeat the entire evidence dataset.
+
+19. Keep the explanation concise and merchant-friendly.
+
+========================================================
+CASE TYPES
+========================================================
+
+DUPLICATE_REFUND:
+Identify when refunds are duplicated or total refunds exceed
+the original payment.
+
+CAPTURED_CANCELLED_NO_REFUND:
+Identify when a payment was captured and later cancelled but
+the expected refund is missing.
+
+REFUND_AMOUNT_MISMATCH:
+Identify when the refund amount does not match the expected
+or recorded amount.
+
+SETTLEMENT_MISMATCH:
+Identify when actual settlement differs from expected settlement.
+
+MISSING_SETTLEMENT:
+Identify when a payment that should have settled has no
+corresponding settlement.
+
+UNEXPLAINED_ADJUSTMENT:
+Identify financial adjustments that cannot be reconciled
+against the available payment/settlement evidence.
+
+========================================================
+CONFIDENCE
+========================================================
+
+HIGH:
+The evidence directly proves the finding.
+
+MEDIUM:
+The evidence strongly suggests the finding but some detail
+remains uncertain.
+
+LOW:
+The evidence is insufficient to confidently establish the finding.
+
+========================================================
+OUTPUT
+========================================================
 
 Return ONLY valid JSON.
 
-Do not use markdown.
-Do not use code fences.
-Do not add text before or after the JSON.
+No markdown.
 
-The JSON MUST have exactly these fields:
+No code fences.
+
+No text before or after the JSON.
+
+Return exactly:
 
 {
   "title": "Short finding",
-  "whatHappened": "Concise explanation of what happened.",
-  "whyItMatters": "Concise explanation of why this matters.",
+  "whatHappened": "What the evidence proves happened.",
+  "whyItMatters": "Why this creates financial risk.",
   "merchantExplanation": "Simple merchant-facing explanation.",
-  "recommendedNextStep": "One clear next action.",
+  "recommendedNextStep": "One practical next action.",
   "confidence": "HIGH"
 }
 
-The confidence value must be one of:
-"HIGH"
-"MEDIUM"
-"LOW"
+The confidence must be exactly one of:
+
+HIGH
+MEDIUM
+LOW
 `;
 
   const userPrompt = `
-Investigate this Money Detective case.
+You are the final financial investigator for Money Detective.
+
+Your job is to explain the verified financial issue in this case.
 
 CASE ID:
-${input.caseId ?? "unknown"}
+${investigationId}
+
+INVESTIGATION TYPE:
+${investigationType}
 
 PAYMENT ID:
 ${paymentId}
 
-QUESTION:
+MERCHANT QUESTION:
 ${input.question}
 
-VERIFIED PAYMENT EVIDENCE:
+========================================================
+VERIFIED PAYMENT EVIDENCE
+========================================================
+
 ${JSON.stringify(
   evidence.getPayments,
   null,
   2
 )}
 
-VERIFIED REFUND EVIDENCE:
+========================================================
+VERIFIED REFUND EVIDENCE
+========================================================
+
 ${JSON.stringify(
   evidence.getRefunds,
   null,
   2
 )}
 
-VERIFIED SETTLEMENT EVIDENCE:
+========================================================
+VERIFIED SETTLEMENT EVIDENCE
+========================================================
+
 ${JSON.stringify(
   evidence.getSettlements,
   null,
   2
 )}
 
-VERIFIED FEE EVIDENCE:
+========================================================
+VERIFIED FEE EVIDENCE
+========================================================
+
 ${JSON.stringify(
   evidence.getFees,
   null,
   2
 )}
 
-VERIFIED EXPECTED SETTLEMENT:
+========================================================
+VERIFIED EXPECTED SETTLEMENT
+========================================================
+
 ${JSON.stringify(
   evidence.calculateExpectedSettlement,
   null,
   2
 )}
 
-VERIFIED UNMATCHED RECORDS:
+========================================================
+VERIFIED UNMATCHED RECORDS
+========================================================
+
 ${JSON.stringify(
   evidence.findUnmatchedRecords,
   null,
   2
 )}
 
-ANALYSIS REQUIREMENTS:
+========================================================
+YOUR TASK
+========================================================
 
-- Determine what actually happened.
-- Identify the financial risk.
-- Use exact amounts.
-- If refunds exceed the payment amount, clearly identify excessive/duplicate refunds.
-- Do NOT call this a duplicate payment unless multiple captured payment records are explicitly shown.
-- Do NOT invent a root cause that is not supported by evidence.
-- Give the merchant one practical next step.
+Analyze ONLY the investigation type:
+
+${investigationType}
+
+Use ONLY facts supported by the verified evidence above.
+
+Do NOT invent events, causes, transactions, refunds, settlements,
+or system behavior that is not present in the evidence.
+
+Do NOT assume that a duplicate refund means a duplicate payment.
+
+Do NOT describe your reasoning process.
+
+Do NOT return a step-by-step investigation.
+
+Do NOT repeat the evidence tables.
+
+Do NOT write headings such as:
+"Step 1"
+"PAYMENTS"
+"REFUNDS"
+"SETTLEMENTS"
+"Key observations"
+
+Instead, produce a concise merchant-facing explanation.
+
+========================================================
+CASE-SPECIFIC RULES
+========================================================
+
+DUPLICATE_REFUND:
+- Identify multiple refunds against the same payment.
+- Explain the excess refund exposure.
+- Do NOT claim that the payment itself was duplicated unless
+  multiple payment records are explicitly present.
+
+CAPTURED_CANCELLED_NO_REFUND:
+- Establish that the payment was captured.
+- Establish that the related order was cancelled.
+- Establish whether a corresponding refund is missing.
+- Do NOT invent why the cancellation occurred.
+
+REFUND_AMOUNT_MISMATCH:
+- Compare the expected/appropriate refund amount with the
+  recorded refund amount using the verified evidence.
+- State the difference when it can be calculated.
+- Do NOT assume a reason for the mismatch unless evidence provides it.
+
+SETTLEMENT_MISMATCH:
+- Compare the deterministic expected settlement with the actual
+  settlement.
+- State the financial difference when supported by the evidence.
+- Do NOT invent a settlement failure reason.
+
+MISSING_SETTLEMENT:
+- Establish that a captured payment exists.
+- Establish that the expected settlement record is absent.
+- Explain the amount potentially affected.
+- Do NOT invent why the settlement is missing.
+
+UNEXPLAINED_ADJUSTMENT:
+- Identify the adjustment.
+- Determine whether the available evidence reconciles it.
+- Explain the resulting financial impact.
+- Do NOT invent the source of the adjustment.
+
+
+========================================================
+DETERMINISTIC FINANCIAL RULE
+========================================================
+
+Financial amounts calculated by the investigation engine are authoritative.
+
+The AI MUST NOT recalculate or alter these amounts.
+
+If the evidence contains a deterministic exposure/leakage amount,
+use that exact amount.
+
+If no deterministic exposure amount is provided, do not invent one.
+
+========================================================
+REQUIRED OUTPUT
+========================================================
+
+Return EXACTLY one JSON object.
+
+The JSON object MUST have exactly these fields:
+
+{
+  "title": "Short name of the financial issue",
+  "whatHappened": "2-3 sentences explaining what actually happened",
+  "whyItMatters": "1-2 sentences explaining the financial impact",
+  "merchantExplanation": "Plain-English explanation for the merchant",
+  "recommendedNextStep": "Specific action the merchant should take",
+  "confidence": "HIGH"
+}
+
+IMPORTANT OUTPUT RULES:
+
+- Return valid JSON only.
+- Do NOT wrap the JSON in markdown code fences.
+- Do NOT put any text before or after the JSON.
+- Do NOT include Step 1, Step 2, analysis, reasoning, or evidence lists.
+- Every statement must be supported by the verified evidence.
+- "confidence" must be exactly one of:
+  "HIGH", "MEDIUM", "LOW".
+
+Example format only:
+
+{
+  "title": "Duplicate refund detected",
+  "whatHappened": "A single payment has multiple refunds recorded against it, including duplicate full refunds.",
+  "whyItMatters": "The refunds exceed the original payment amount, creating excess financial exposure.",
+  "merchantExplanation": "The customer appears to have received more money back than the original payment amount.",
+  "recommendedNextStep": "Reconcile the refunds against the original payment and initiate recovery for the excess amount.",
+  "confidence": "HIGH"
+}
 
 Return ONLY the JSON object.
 `;
-
-  const messages: OllamaMessage[] = [
-    {
-      role: "system",
-
-      content:
-        systemPrompt,
-    },
-
-    {
-      role: "user",
-
-      content:
-        userPrompt,
-    },
-  ];
 
   console.log(
     "[AI] Sending verified evidence to Ollama for final synthesis."
   );
 
-  /*
-   * No tools during final synthesis.
-   */
-
   const response =
     await callOllama(
-      messages,
+      [
+        {
+          role: "system",
+
+          content:
+            systemPrompt,
+        },
+
+        {
+          role: "user",
+
+          content:
+            userPrompt,
+        },
+      ],
       false
     );
 
@@ -906,58 +1301,541 @@ Return ONLY the JSON object.
   }
 
   const report =
-    parseInvestigationReport(
-      rawAnswer
-    );
-
-  /*
-   * Validate required fields.
-   */
-
-  if (
-    typeof report.title !==
-      "string" ||
-    typeof report.whatHappened !==
-      "string" ||
-    typeof report.whyItMatters !==
-      "string" ||
-    typeof report.merchantExplanation !==
-      "string" ||
-    typeof report.recommendedNextStep !==
-      "string" ||
-    typeof report.confidence !==
-      "string"
-  ) {
-    console.error(
-      "[AI] Invalid investigation structure:",
-      report
-    );
-
-    throw new Error(
-      "Ollama returned an incomplete investigation."
-    );
-  }
-
-  console.log(
-    `[AI] Ollama investigation completed for ${
-      input.caseId ??
-      paymentId
-    }`
+  parseInvestigationReport(
+    rawAnswer
   );
 
-  return {
-    success: true,
+/*
+ * =======================================================
+ * STEP 4 — RECOVER
+ * =======================================================
+ *
+ * Recovery is deterministic and human-review only.
+ *
+ * Ollama does NOT execute recovery.
+ * The backend calculates the amount from verified evidence.
+ * The recovery tools only prepare a case/message.
+ */
 
-    model:
-      OLLAMA_MODEL,
+console.log(
+  `[RECOVERY] Preparing recovery actions for ${investigationId}`
+);
 
-    report,
+/*
+ * -------------------------------------------------------
+ * Recovery eligibility
+ * -------------------------------------------------------
+ */
 
-    answer:
-      JSON.stringify(
-        report
-      ),
+const recoverableTypes = new Set([
+  "DUPLICATE_REFUND",
+  "CAPTURED_CANCELLED_NO_REFUND",
+  "REFUND_AMOUNT_MISMATCH",
+  "SETTLEMENT_MISMATCH",
+  "MISSING_SETTLEMENT",
+  "UNEXPLAINED_ADJUSTMENT",
+]);
 
-    iterations: 1,
-  };
+const shouldPrepareRecovery =
+  recoverableTypes.has(
+    investigationType
+  );
+
+/*
+ * -------------------------------------------------------
+ * Helpers
+ * -------------------------------------------------------
+ */
+
+/*
+ * agentTools.ts returns objects like:
+ *
+ * getPayments()
+ * {
+ *   count: 1,
+ *   payments: [...]
+ * }
+ *
+ * getRefunds()
+ * {
+ *   count: 3,
+ *   refunds: [...]
+ * }
+ *
+ * calculateExpectedSettlement()
+ * {
+ *   found: true,
+ *   expectedSettlement: ...
+ * }
+ */
+
+function asNumber(
+  value: unknown
+): number | undefined {
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value)
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "string"
+  ) {
+    const parsed =
+      Number(value);
+
+    if (
+      Number.isFinite(parsed)
+    ) {
+      return parsed;
+    }
+  }
+
+  return undefined;
 }
+
+function getArray(
+  evidenceItem: unknown,
+  key: string
+): Record<string, unknown>[] {
+  if (
+    typeof evidenceItem !== "object" ||
+    evidenceItem === null
+  ) {
+    return [];
+  }
+
+  const wrapper =
+    evidenceItem as Record<
+      string,
+      unknown
+    >;
+
+  const value =
+    wrapper[key];
+
+  if (
+    !Array.isArray(value)
+  ) {
+    return [];
+  }
+
+  return value.filter(
+    (
+      item
+    ): item is Record<string, unknown> =>
+      typeof item === "object" &&
+      item !== null
+  );
+}
+
+/*
+ * -------------------------------------------------------
+ * Deterministic recovery amount
+ * -------------------------------------------------------
+ */
+
+let recoveryAmount:
+  | number
+  | undefined;
+
+/*
+ * -------------------------------------------------------
+ * DUPLICATE_REFUND
+ * -------------------------------------------------------
+ *
+ * Recovery =
+ *
+ * total refunds - original payment
+ *
+ * Example:
+ *
+ * Payment: ₹46,324.47
+ * Refunds: ₹110,656.24
+ *
+ * Recovery:
+ * ₹64,331.77
+ */
+
+if (
+  investigationType ===
+  "DUPLICATE_REFUND"
+) {
+  const payments =
+    getArray(
+      evidence.getPayments,
+      "payments"
+    );
+
+  const refunds =
+    getArray(
+      evidence.getRefunds,
+      "refunds"
+    );
+
+  const paymentAmount =
+    asNumber(
+      payments[0]?.amount
+    );
+
+  const totalRefunds =
+    refunds.reduce(
+      (
+        total,
+        refund
+      ) =>
+        total +
+        (
+          asNumber(
+            refund.amount
+          ) ?? 0
+        ),
+      0
+    );
+
+  console.log(
+    "[RECOVERY] Duplicate refund calculation",
+    {
+      paymentAmount,
+      totalRefunds,
+    }
+  );
+
+  if (
+    paymentAmount !== undefined &&
+    totalRefunds >
+      paymentAmount
+  ) {
+    recoveryAmount =
+      Number(
+        (
+          totalRefunds -
+          paymentAmount
+        ).toFixed(2)
+      );
+  }
+}
+
+/*
+ * -------------------------------------------------------
+ * REFUND_AMOUNT_MISMATCH
+ * -------------------------------------------------------
+ *
+ * Use the deterministic expected settlement
+ * when it establishes a negative exposure.
+ */
+
+if (
+  recoveryAmount === undefined &&
+  investigationType ===
+    "REFUND_AMOUNT_MISMATCH"
+) {
+  const expected =
+    asNumber(
+      (
+        evidence.calculateExpectedSettlement as
+          Record<string, unknown>
+          | undefined
+      )?.expectedSettlement
+    );
+
+  if (
+    expected !== undefined &&
+    expected < 0
+  ) {
+    recoveryAmount =
+      Number(
+        Math.abs(
+          expected
+        ).toFixed(2)
+      );
+  }
+}
+
+/*
+ * -------------------------------------------------------
+ * SETTLEMENT_MISMATCH
+ * -------------------------------------------------------
+ */
+
+if (
+  recoveryAmount === undefined &&
+  investigationType ===
+    "SETTLEMENT_MISMATCH"
+) {
+  const expected =
+    asNumber(
+      (
+        evidence.calculateExpectedSettlement as
+          Record<string, unknown>
+          | undefined
+      )?.expectedSettlement
+    );
+
+  const settlements =
+    getArray(
+      evidence.getSettlements,
+      "settlements"
+    );
+
+  const actual =
+    asNumber(
+      settlements[0]?.netAmount
+    );
+
+  console.log(
+    "[RECOVERY] Settlement mismatch calculation",
+    {
+      expected,
+      actual,
+    }
+  );
+
+  if (
+    expected !== undefined &&
+    actual !== undefined
+  ) {
+    const difference =
+      Math.abs(
+        actual -
+        expected
+      );
+
+    if (
+      difference > 0.01
+    ) {
+      recoveryAmount =
+        Number(
+          difference.toFixed(2)
+        );
+    }
+  }
+}
+
+/*
+ * -------------------------------------------------------
+ * MISSING_SETTLEMENT
+ * -------------------------------------------------------
+ */
+
+if (
+  recoveryAmount === undefined &&
+  investigationType ===
+    "MISSING_SETTLEMENT"
+) {
+  const expected =
+    asNumber(
+      (
+        evidence.calculateExpectedSettlement as
+          Record<string, unknown>
+          | undefined
+      )?.expectedSettlement
+    );
+
+  console.log(
+    "[RECOVERY] Missing settlement calculation",
+    {
+      expected,
+    }
+  );
+
+  if (
+    expected !== undefined &&
+    expected > 0
+  ) {
+    recoveryAmount =
+      Number(
+        expected.toFixed(2)
+      );
+  }
+}
+
+/*
+ * -------------------------------------------------------
+ * CAPTURED_CANCELLED_NO_REFUND
+ * -------------------------------------------------------
+ */
+
+if (
+  recoveryAmount === undefined &&
+  investigationType ===
+    "CAPTURED_CANCELLED_NO_REFUND"
+) {
+  const payments =
+    getArray(
+      evidence.getPayments,
+      "payments"
+    );
+
+  const paymentAmount =
+    asNumber(
+      payments[0]?.amount
+    );
+
+  console.log(
+    "[RECOVERY] Captured cancelled payment calculation",
+    {
+      paymentAmount,
+    }
+  );
+
+  if (
+    paymentAmount !== undefined &&
+    paymentAmount > 0
+  ) {
+    recoveryAmount =
+      Number(
+        paymentAmount.toFixed(2)
+      );
+  }
+}
+
+/*
+ * -------------------------------------------------------
+ * UNEXPLAINED_ADJUSTMENT
+ * -------------------------------------------------------
+ *
+ * Only prepare recovery when deterministic
+ * evidence establishes a clear exposure.
+ */
+
+if (
+  recoveryAmount === undefined &&
+  investigationType ===
+    "UNEXPLAINED_ADJUSTMENT"
+) {
+  const expected =
+    asNumber(
+      (
+        evidence.calculateExpectedSettlement as
+          Record<string, unknown>
+          | undefined
+      )?.expectedSettlement
+    );
+
+  if (
+    expected !== undefined &&
+    expected < 0
+  ) {
+    recoveryAmount =
+      Number(
+        Math.abs(
+          expected
+        ).toFixed(2)
+      );
+  }
+}
+
+console.log(
+  "[RECOVERY] Final deterministic recovery amount:",
+  recoveryAmount
+);
+
+/*
+ * -------------------------------------------------------
+ * Recovery reason
+ * -------------------------------------------------------
+ */
+
+const recoveryReason =
+  `${report.title}. ` +
+  `${report.whyItMatters} ` +
+  `Recommended action: ` +
+  `${report.recommendedNextStep}`;
+
+/*
+ * -------------------------------------------------------
+ * Recovery tools
+ * -------------------------------------------------------
+ */
+
+let recovery:
+  | ReturnType<
+      typeof createRecoveryCase
+    >
+  | null = null;
+
+let recoveryMessage:
+  | ReturnType<
+      typeof draftRecoveryMessage
+    >
+  | null = null;
+
+if (
+  shouldPrepareRecovery &&
+  recoveryAmount !== undefined &&
+  recoveryAmount > 0
+) {
+  console.log(
+    "[RECOVERY TOOL CALL] createRecoveryCase",
+    {
+      paymentId,
+      amount:
+        recoveryAmount,
+    }
+  );
+
+  recovery =
+    createRecoveryCase({
+      paymentId,
+
+      amount:
+        recoveryAmount,
+
+      reason:
+        recoveryReason,
+    });
+
+  console.log(
+    "[RECOVERY TOOL CALL] draftRecoveryMessage",
+    {
+      paymentId,
+      amount:
+        recoveryAmount,
+    }
+  );
+
+  recoveryMessage =
+    draftRecoveryMessage({
+      paymentId,
+
+      amount:
+        recoveryAmount,
+
+      reason:
+        recoveryReason,
+    });
+
+  console.log(
+    `[RECOVERY] Recovery preparation completed for ${investigationId}`
+  );
+} else {
+  console.log(
+    `[RECOVERY] No recovery action prepared for ${investigationId}`
+  );
+}
+
+console.log(
+  `[AI] Ollama investigation completed for ${investigationId}`
+);
+
+return {
+  success: true,
+
+  model:
+    OLLAMA_MODEL,
+
+  report,
+
+  recovery,
+
+  recoveryMessage,
+
+  answer:
+    JSON.stringify(
+      report
+    ),
+
+  iterations: 1,
+};}

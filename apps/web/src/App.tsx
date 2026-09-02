@@ -94,23 +94,57 @@ type AIReport = {
 };
 
 type RecoveryPlan = {
+
+  caseId: string;
+  recoveryStatus: string;
+
   recoverability: string;
   recoverabilityReason: string;
+
   financialImpact: {
     potentialRecovery: number;
     currency: string;
   };
+
   recoveryAction: {
     type: string;
     action: string;
     owner: string;
     priority: string;
   };
+
   rationale: string;
+
   steps: string[];
+
   humanReview: {
     required: boolean;
     reason: string;
+  };
+
+  recoveryCase?: {
+    caseId?: string;
+    status?: string;
+    amount?: number;
+    paymentId?: string;
+    reason?: string;
+  };
+
+  recoveryMessage?: {
+    subject?: string;
+    message?: string;
+    body?: string;
+  };
+
+  verification: {
+    criteria: string;
+    expectedOutcome: string;
+  };
+
+  aiContext: {
+    confidence: string;
+    finding: string;
+    recommendedNextStep: string;
   };
 };
 
@@ -1249,82 +1283,159 @@ function CaseInvestigation({
           </div>
 
           {/* RECOVERY */}
-          <div className="panel recovery-panel">
-            <PanelHeading
-              icon={<Wallet />}
-              eyebrow="RECOVERY"
-              title="Action plan"
-            />
+<div className="panel recovery-panel">
+  <PanelHeading
+    icon={<Wallet />}
+    eyebrow="RECOVERY"
+    title="Action plan"
+  />
 
-            {caseLoading && !recovery ? (
-              <div className="loading">
-                Loading recovery plan...
-              </div>
-            ) : recovery ? (
-              <>
-                <div className="recovery-amount">
-                  {money(
-                    recovery.financialImpact
-                      .potentialRecovery
-                  )}
-                </div>
+  {caseLoading && !recovery ? (
+    <div className="loading">
+      Preparing recovery action...
+    </div>
+  ) : recovery ? (
+    <>
+      {/* MONEY AT RISK */}
+      <div className="recovery-amount">
+        {money(
+          recovery.financialImpact
+            .potentialRecovery
+        )}
+      </div>
 
-                <div className="recovery-label">
-                  potential recovery
-                </div>
+      <div className="recovery-label">
+        potentially recoverable
+      </div>
 
-                <div className="recovery-status">
-                  {recovery.recoverability}{" "}
-                  recoverability
-                </div>
+      {/* RECOVERABILITY */}
+      <div className="recovery-status">
+        {recovery.recoveryStatus.replaceAll("_", " ")}
+      </div>
 
-                <div className="action-box">
-                  <label>ACTION</label>
+      {/* ACTION */}
+      <div className="action-box">
+        <label>ACTION</label>
 
-                  <strong>
-                    {recovery.recoveryAction.action}
-                  </strong>
+        <strong>
+          {recovery.recoveryAction.action}
+        </strong>
 
-                  <div className="action-meta">
-                    <span>
-                      Owner:{" "}
-                      {recovery.recoveryAction.owner}
-                    </span>
+        <div className="action-meta">
+          <span>
+            Owner:{" "}
+            {recovery.recoveryAction.owner}
+          </span>
 
-                    <span>
-                      Priority:{" "}
-                      {recovery.recoveryAction.priority}
-                    </span>
-                  </div>
-                </div>
+          <span>
+            Priority:{" "}
+            {recovery.recoveryAction.priority}
+          </span>
+        </div>
+      </div>
 
-                <ol className="steps">
-                  {recovery.steps.map(
-                    (step, index) => (
-                      <li key={index}>
-                        <span>
-                          {index + 1}
-                        </span>
+      {/* WHY */}
+      <div className="ai-section">
+        <label>
+          WHY THIS SHOULD BE RECOVERED
+        </label>
 
-                        {step}
-                      </li>
-                    )
-                  )}
-                </ol>
+        <p>
+          {recovery.rationale}
+        </p>
+      </div>
 
-                {recovery.humanReview.required && (
-                  <div className="review-notice">
-                    Human review required before
-                    financial action.
-                  </div>
+      {/* RECOVERY STEPS */}
+      <div className="ai-section">
+        <label>
+          RECOVERY STEPS
+        </label>
+      </div>
+
+      <ol className="steps">
+        {recovery.steps.map(
+          (step, index) => (
+            <li key={index}>
+              <span>
+                {index + 1}
+              </span>
+
+              {step}
+            </li>
+          )
+        )}
+      </ol>
+
+      {/* RECOVERY CASE */}
+      {recovery.recoveryCase && (
+        <div className="action-box">
+          <label>
+            RECOVERY CASE
+          </label>
+
+          <strong>
+            {recovery.recoveryCase.status ??
+              "CREATED"}
+          </strong>
+
+          {recovery.recoveryCase.caseId && (
+            <div className="action-meta">
+              <span>
+                Case:{" "}
+                {recovery.recoveryCase.caseId}
+              </span>
+            </div>
+          )}
+
+          {recovery.recoveryCase.amount !==
+            undefined && (
+            <div className="action-meta">
+              <span>
+                Amount:{" "}
+                {money(
+                  recovery.recoveryCase.amount
                 )}
-              </>
-            ) : (
-              <div className="empty-state">
-                Recovery plan is unavailable.
-              </div>
-            )}
-          </div>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* RECOVERY MESSAGE */}
+      {recovery.recoveryMessage && (
+        <div className="action-box">
+          <label>
+            DRAFT RECOVERY MESSAGE
+          </label>
+
+          {recovery.recoveryMessage.subject && (
+            <strong>
+              {recovery.recoveryMessage.subject}
+            </strong>
+          )}
+
+          <p>
+            {recovery.recoveryMessage.message ??
+              recovery.recoveryMessage.body ??
+              "Recovery message prepared for merchant review."}
+          </p>
+        </div>
+      )}
+
+      {/* HUMAN REVIEW */}
+      {recovery.humanReview.required && (
+        <div className="review-notice">
+          Human review required before
+          financial action.
+        </div>
+      )}
+    </>
+  ) : (
+    <div className="empty-state">
+      Recovery plan is unavailable.
+    </div>
+  )}
+</div>
         </section>
 
         {/* VERIFICATION */}
