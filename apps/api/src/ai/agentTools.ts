@@ -378,6 +378,45 @@ export function draftRecoveryMessage({
     requiresHumanReview: true,
   };
 }
+
+export function approveRecoveryCase({
+  paymentId,
+}: {
+  paymentId: string;
+}) {
+  return {
+    success: true,
+    paymentId,
+    recoveryStatus: "approved",
+    recoveryAction: "initiated",
+    verificationStatus: "pending",
+    approvedBy: "human",
+    approvedAt: new Date().toISOString(),
+    message:
+      "Recovery approved by human reviewer. Recovery action can now be initiated and verified.",
+  };
+}
+
+export function rejectRecoveryCase({
+  paymentId,
+  reason,
+}: {
+  paymentId: string;
+  reason?: string;
+}) {
+  return {
+    success: true,
+    paymentId,
+    recoveryStatus: "rejected",
+    recoveryAction: "not_initiated",
+    verificationStatus: "not_applicable",
+    rejectedBy: "human",
+    rejectedAt: new Date().toISOString(),
+    reason:
+      reason ||
+      "Recovery recommendation rejected by human reviewer.",
+  };
+}
 /*
 |--------------------------------------------------------------------------
 | Tool registry
@@ -394,7 +433,9 @@ export const toolHandlers = {
   findUnmatchedRecords,
   getTransactionHistory,
   createRecoveryCase,
-  draftRecoveryMessage
+  draftRecoveryMessage,
+  approveRecoveryCase,
+  rejectRecoveryCase
 };
 
 export const ollamaTools = [

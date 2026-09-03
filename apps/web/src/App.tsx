@@ -98,6 +98,20 @@ type RecoveryPlan = {
   caseId: string;
   recoveryStatus: string;
 
+  recoveryDecision?: {
+  action:
+    | "initiated"
+    | "not_initiated";
+
+  verificationStatus:
+    | "pending"
+    | "not_applicable";
+
+  decidedBy: "human";
+  decidedAt: string;
+  reason?: string;
+};
+
   recoverability: string;
   recoverabilityReason: string;
 
@@ -232,6 +246,12 @@ const [loadingCaseId, setLoadingCaseId] =
 const [caseError, setCaseError] =
   useState("");
 
+const [recoveryActionLoading, setRecoveryActionLoading] =
+  useState(false);
+
+const [recoveryActionError, setRecoveryActionError] =
+  useState("");
+
   useEffect(() => {
   async function initialize() {
     try {
@@ -319,6 +339,179 @@ const [caseError, setCaseError] =
       ? data.cases
       : []
   );
+}
+
+
+async function handleRecoveryDecision(
+  action: "approve" | "reject"
+) {
+  if (!selectedCase) {
+    return;
+  }
+
+  setRecoveryActionLoading(true);
+  setRecoveryActionError("");
+
+  try {
+    const response = await fetch(
+      `${API}/api/cases/${selectedCase.caseId}/recovery/${action}`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body:
+          action === "reject"
+            ? JSON.stringify({
+                reason:
+                  "Recovery recommendation rejected by human reviewer.",
+              })
+            : undefined,
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.error ||
+          `Recovery ${action} failed.`
+      );
+    }
+
+    /*
+     * Reload recovery + verification
+     * so the UI reflects the backend state.
+     */
+    const [
+      recoveryResponse,
+      verificationResponse,
+    ] = await Promise.all([
+      fetch(
+        `${API}/api/cases/${selectedCase.caseId}/recovery`
+      ),
+      fetch(
+        `${API}/api/cases/${selectedCase.caseId}/verification`
+      ),
+    ]);
+
+    const recoveryData =
+      await recoveryResponse.json();
+
+    const verificationData =
+      await verificationResponse.json();
+
+    setRecovery(
+      recoveryData.plan ?? null
+    );
+
+    setVerification(
+      verificationData.verification ??
+        null
+    );
+
+    /*
+     * Refresh dashboard totals as well.
+     */
+    await loadDashboard();
+
+  } catch (err) {
+    console.error(
+      "Recovery decision failed:",
+      err
+    );
+
+    setRecoveryActionError(
+      err instanceof Error
+        ? err.message
+        : "Unable to update recovery decision."
+    );
+  } finally {
+    setRecoveryActionLoading(false);
+  }
+}
+
+
+
+
+/* ADD THIS HERE */
+
+async function completeRecovery() {
+  if (!selectedCase) {
+    return;
+  }
+
+  try {
+    setRecoveryActionLoading(true);
+    setRecoveryActionError("");
+
+    const response = await fetch(
+      `${API}/api/cases/${selectedCase.caseId}/recovery/complete`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.error ||
+          "Failed to complete recovery."
+      );
+    }
+
+    const [
+      recoveryResponse,
+      verificationResponse,
+    ] = await Promise.all([
+      fetch(
+        `${API}/api/cases/${selectedCase.caseId}/recovery`
+      ),
+      fetch(
+        `${API}/api/cases/${selectedCase.caseId}/verification`
+      ),
+    ]);
+
+    const recoveryData =
+      await recoveryResponse.json();
+
+    const verificationData =
+      await verificationResponse.json();
+
+    setRecovery(
+      recoveryData.plan ?? null
+    );
+
+    setVerification(
+      verificationData.verification ??
+        null
+    );
+
+    await loadDashboard();
+
+  } catch (err) {
+    console.error(
+      "Recovery completion failed:",
+      err
+    );
+
+    setRecoveryActionError(
+      err instanceof Error
+        ? err.message
+        : "Unable to complete recovery."
+    );
+
+  } finally {
+    setRecoveryActionLoading(false);
+  }
 }
 
   async function openCase(item: Case) {
@@ -647,6 +840,10 @@ const [caseError, setCaseError] =
         caseError={caseError}
         verification={verification}
         onBack={backToCases}
+        onRecoveryDecision={handleRecoveryDecision}
+        recoveryActionLoading={recoveryActionLoading}
+        recoveryActionError={recoveryActionError}
+        completeRecovery={completeRecovery}
       />
     );
   }
@@ -1021,6 +1218,10 @@ function CaseInvestigation({
   caseLoading,
   caseError,
   onBack,
+  onRecoveryDecision,
+  recoveryActionLoading,
+  recoveryActionError,
+  completeRecovery,
 }: {
   item: Case;
   evidence: EvidenceGraph | null;
@@ -1030,6 +1231,13 @@ function CaseInvestigation({
   caseLoading: boolean;
   caseError: string;
   onBack: () => void;
+  onRecoveryDecision: (
+    action: "approve" | "reject"
+  ) => void;
+
+  recoveryActionLoading: boolean;
+  recoveryActionError: string;
+  completeRecovery: () => Promise<void>;
 }) {
   return (
     <div className="app-shell">
@@ -1299,8 +1507,7 @@ function CaseInvestigation({
       {/* MONEY AT RISK */}
       <div className="recovery-amount">
         {money(
-          recovery.financialImpact
-            .potentialRecovery
+          recovery.financialImpact.potentialRecovery
         )}
       </div>
 
@@ -1308,9 +1515,12 @@ function CaseInvestigation({
         potentially recoverable
       </div>
 
-      {/* RECOVERABILITY */}
+      {/* RECOVERY STATUS */}
       <div className="recovery-status">
-        {recovery.recoveryStatus.replaceAll("_", " ")}
+        {recovery.recoveryStatus.replaceAll(
+          "_",
+          " "
+        )}
       </div>
 
       {/* ACTION */}
@@ -1334,7 +1544,116 @@ function CaseInvestigation({
         </div>
       </div>
 
-      {/* WHY */}
+      {/* HUMAN REVIEW */}
+      {recovery.humanReview.required && (
+        <>
+          {/* WAITING FOR HUMAN DECISION */}
+          {recovery.recoveryStatus ===
+            "human_review_required" && (
+            <div className="recovery-review-actions">
+              <div className="review-notice">
+                Human review required before
+                financial action.
+              </div>
+
+              <div className="recovery-buttons">
+                <button
+                  type="button"
+                  className="approve-recovery-button"
+                  onClick={() =>
+                    onRecoveryDecision(
+                      "approve"
+                    )
+                  }
+                  disabled={
+                    recoveryActionLoading
+                  }
+                >
+                  <CheckCircle2 size={17} />
+
+                  {recoveryActionLoading
+                    ? "Processing..."
+                    : "Approve Recovery"}
+                </button>
+
+                <button
+                  type="button"
+                  className="reject-recovery-button"
+                  onClick={() =>
+                    onRecoveryDecision(
+                      "reject"
+                    )
+                  }
+                  disabled={
+                    recoveryActionLoading
+                  }
+                >
+                  Reject
+                </button>
+              </div>
+
+              {recoveryActionError && (
+                <div
+                  className="recovery-action-error"
+                  role="alert"
+                >
+                  {recoveryActionError}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* APPROVED */}
+          {recovery.recoveryStatus ===
+  "approved" && (
+  <div className="recovery-approved">
+    <CheckCircle2 size={18} />
+
+    <div>
+      <strong>
+        Recovery approved
+      </strong>
+
+      <span>
+        Recovery action initiated ·
+        Verification pending
+      </span>
+
+      <button
+        type="button"
+        className="approve-recovery-button"
+        onClick={completeRecovery}
+        disabled={recoveryActionLoading}
+      >
+        {recoveryActionLoading
+          ? "Verifying..."
+          : "Confirm Recovery Completed"}
+      </button>
+    </div>
+  </div>
+)}
+          {/* REJECTED */}
+          {recovery.recoveryStatus ===
+            "rejected" && (
+            <div className="recovery-rejected">
+              <AlertTriangle size={18} />
+
+              <div>
+                <strong>
+                  Recovery rejected
+                </strong>
+
+                <span>
+                  No recovery action was
+                  initiated.
+                </span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* WHY THIS SHOULD BE RECOVERED */}
       <div className="ai-section">
         <label>
           WHY THIS SHOULD BE RECOVERED
@@ -1421,14 +1740,6 @@ function CaseInvestigation({
           </p>
         </div>
       )}
-
-      {/* HUMAN REVIEW */}
-      {recovery.humanReview.required && (
-        <div className="review-notice">
-          Human review required before
-          financial action.
-        </div>
-      )}
     </>
   ) : (
     <div className="empty-state">
@@ -1436,6 +1747,7 @@ function CaseInvestigation({
     </div>
   )}
 </div>
+
         </section>
 
         {/* VERIFICATION */}

@@ -970,3 +970,77 @@ button {
     transform: rotate(360deg);
   }
 }
+
+.recovery-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.approve-recovery-button,
+.reject-recovery-button {
+  border: 0;
+  border-radius: 10px;
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.approve-recovery-button {
+  background: #111;
+  color: #fff;
+}
+
+.reject-recovery-button {
+  background: #fff;
+  color: #8b1e1e;
+  border: 1px solid #d8b4b4;
+}
+
+.approve-recovery-button:disabled,
+.reject-recovery-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.recovery-approved,
+.recovery-rejected {
+  margin-top: 14px;
+  padding: 13px 15px;
+  border-radius: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.recovery-approved {
+  background: #eef8f1;
+  color: #23613a;
+}
+
+.recovery-rejected {
+  background: #faf0f0;
+  color: #8b1e1e;
+}
+
+.recovery-approved strong,
+.recovery-rejected strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.recovery-approved span,
+.recovery-rejected span {
+  display: block;
+  font-size: 13px;
+}
+
+.recovery-action-error {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #a12b2b;
+}

@@ -1,0 +1,53 @@
+{
+  "decisions": [
+    {
+      "caseId": "INV-DUPLICATE-REFUND-pay_007132",
+      "recoveryStatus": "approved",
+      "recoveryAction": "initiated",
+      "verificationStatus": "pending",
+      "decidedBy": "human",
+      "decidedAt": "2026-09-02T19:31:57.406Z"
+    },
+    {
+      "caseId": "INV-DUPLICATE-REFUND-pay_007547",
+      "recoveryStatus": "recovered",
+      "recoveryAction": "completed",
+      "verificationStatus": "recovered",
+      "decidedBy": "human",
+      "decidedAt": "2026-09-02T21:08:05.096Z"
+    },
+    {
+      "caseId": "INV-DUPLICATE-REFUND-pay_003797",
+      "recoveryStatus": "approved",
+      "recoveryAction": "initiated",
+      "verificationStatus": "pending",
+      "decidedBy": "human",
+      "decidedAt": "2026-09-02T20:20:01.148Z"
+    },
+    {
+      "caseId": "INV-DUPLICATE-REFUND-pay_000423",
+      "recoveryStatus": "rejected",
+      "recoveryAction": "not_initiated",
+      "verificationStatus": "not_applicable",
+      "decidedBy": "human",
+      "decidedAt": "2026-09-02T20:22:42.934Z",
+      "reason": "Recovery recommendation rejected by human reviewer."
+    },
+    {
+      "caseId": "INV-DUPLICATE-REFUND-pay_002363",
+      "recoveryStatus": "recovered",
+      "recoveryAction": "completed",
+      "verificationStatus": "recovered",
+      "decidedBy": "human",
+      "decidedAt": "2026-09-02T21:03:38.180Z"
+    },
+    {
+      "caseId": "INV-DUPLICATE-REFUND-pay_006020",
+      "recoveryStatus": "recovered",
+      "recoveryAction": "completed",
+      "verificationStatus": "recovered",
+      "decidedBy": "human",
+      "decidedAt": "2026-09-03T08:20:57.306Z"
+    }
+  ]
+}
